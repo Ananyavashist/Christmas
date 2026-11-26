@@ -1,0 +1,600 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Christmas Tree Night</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,600;1,9..144,400&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root{ --bg:#06171b; --cream:#f3e6c8; --cream-dim:#bfb08e; --gold:#f2c14e; --gold-soft:#f7d98a; }
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg)}
+body{background:radial-gradient(120% 90% at 50% 0%, #0d3238 0%, #081f24 50%, #040f12 100%);color:var(--cream);font-family:"Fraunces",Georgia,serif}
+canvas{position:fixed;inset:0;width:100%;height:100%;display:block}
+.controls{position:fixed;top:16px;right:16px;z-index:5;display:flex;gap:8px;align-items:center}
+.picker{position:relative}
+.shape{display:flex;gap:2px;padding:3px;border-radius:999px;border:1px solid rgba(242,193,78,.55);background:rgba(4,15,18,.78);box-shadow:0 8px 24px rgba(0,0,0,.4);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+.shape button{width:34px;height:34px;border-radius:50%;border:0;background:transparent;color:var(--cream-dim);cursor:pointer;display:grid;place-items:center}
+.shape button svg{width:16px;height:16px}
+.shape button[aria-pressed="true"]{background:rgba(242,193,78,.22);color:var(--gold)}
+.shape button:hover{color:var(--gold)}
+.shape button:focus-visible{outline:2px solid var(--gold);outline-offset:1px}
+.picker select{appearance:none;-webkit-appearance:none;font:600 16px/1 "Fraunces",Georgia,serif;color:var(--cream);
+  background:rgba(4,15,18,.78);border:1px solid rgba(242,193,78,.55);border-radius:999px;padding:12px 40px 12px 18px;cursor:pointer;
+  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);box-shadow:0 8px 24px rgba(0,0,0,.4);min-width:190px}
+.picker::after{content:"";position:absolute;right:17px;top:50%;width:8px;height:8px;margin-top:-6px;border-right:2px solid var(--gold);border-bottom:2px solid var(--gold);transform:rotate(45deg);pointer-events:none}
+.picker select option{color:#1b1b1b;background:#f3e6c8}
+.replay{width:42px;height:42px;border-radius:50%;border:1px solid rgba(242,193,78,.55);background:rgba(4,15,18,.78);color:var(--gold);cursor:pointer;display:grid;place-items:center;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+.replay:hover{background:rgba(242,193,78,.18)}
+.replay svg{width:20px;height:20px}
+.picker select:focus-visible,.replay:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+.caption{position:fixed;left:16px;top:14px;z-index:5;pointer-events:none;max-width:calc(100% - 180px)}
+@media (max-width:560px){.caption .how{display:none}}
+.caption .name{font-size:clamp(20px,2.6vw,28px);font-weight:600;text-shadow:0 2px 14px rgba(0,0,0,.7)}
+.caption .name em{color:var(--gold);font-weight:400}
+.caption .how{font-family:"IBM Plex Mono",monospace;font-size:11.5px;letter-spacing:.06em;color:var(--cream-dim);margin-top:2px}
+@media (max-width:520px){ .picker select{min-width:0;font-size:15px;padding:11px 36px 11px 14px} }
+</style>
+</head>
+<body>
+<canvas id="stage" role="img" aria-label="ASCII art Christmas scene"></canvas>
+<div class="controls">
+  <div class="shape" role="group" aria-label="Pixel shape">
+    <button id="shapeCircle" aria-pressed="true" aria-label="Circle pixels" title="Circle pixels (D to switch)"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" fill="currentColor"/></svg></button>
+    <button id="shapeDiamond" aria-pressed="false" aria-label="Diamond pixels" title="Diamond pixels (D to switch)"><svg viewBox="0 0 16 16"><path d="M8 1 15 8 8 15 1 8Z" fill="currentColor"/></svg></button>
+  </div>
+    <button class="replay" id="replay" aria-label="Replay this scene" title="Replay (R)">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>
+  </button>
+</div>
+<div class="caption"><div class="name">The Christmas <em>tree</em></div><div class="how">press replay (or R) to watch it again, D switches the pixel shape</div></div>
+
+<script>
+(function(){
+"use strict";
+/* Everything on the canvas is drawn with text characters only. */
+
+const SCENE_INFO = {
+  intro:    { name:'Merry <em>Christmas</em>',      how:"pick a scene from the menu, top right" },
+  santa:    { name:"Santa's <em>sleigh</em>",        how:"flies in, loops the sky, and lands on the snow" },
+  reindeer: { name:"The <em>reindeer</em>",          how:"a constellation draws itself, then it leaps to life" },
+  globe:    { name:"The snow <em>globe</em>",        how:"base, glass, then each figure appears inside" },
+  tree:     { name:"The Christmas <em>tree</em>",    how:"the star drops, the tree swirls into shape, gifts pop up" },
+  town:     { name:"The <em>town</em>",              how:"houses rise, windows light up, the star ignites" }
+};
+
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const $ = id => document.getElementById(id);
+const cvs = $('stage'), ctx = cvs.getContext('2d');
+const glowC = document.createElement('canvas'), gctx = glowC.getContext('2d');
+
+/* ---------- maths ---------- */
+const clamp = (v,a=0,b=1) => v<a?a:v>b?b:v;
+const lerp = (a,b,t) => a+(b-a)*t;
+const eOut = t => 1-Math.pow(1-t,3);
+const eIn = t => t*t*t;
+const eInOut = t => t<.5 ? 4*t*t*t : 1-Math.pow(-2*t+2,3)/2;
+const eBack = (t,s=1.7) => 1+(s+1)*Math.pow(t-1,3)+s*Math.pow(t-1,2);
+const smooth = (a,b,t) => { const x = clamp((t-a)/(b-a)); return x*x*(3-2*x); };
+const hash = n => { const s = Math.sin(n*127.1+311.7)*43758.5453; return s - Math.floor(s); };
+
+/* ---------- colours ---------- */
+const P = {
+  r:[222,58,48], R:[150,32,30], w:[244,240,228], W:[200,215,230], g:[245,196,80], G:[190,140,50], b:[200,135,80], B:[135,88,52],
+  k:[70,70,85], o:[245,145,55], n:[80,175,90], N:[40,120,60], s:[246,200,170], y:[255,226,130], c:[232,214,176], x:[150,160,175],
+  i:[175,215,255], p:[200,120,200], t:[110,200,190], m:[200,255,190], M:[120,230,140]
+};
+
+/* ---------- character grid ---------- */
+let W=0,H=0,DPR=1, CW=9, CH=15, AR=1.65, cols=0, rows=0, FONT='';
+let gch, gr, gg, gb, ga, gz;
+function setup(){
+  DPR = Math.min(window.devicePixelRatio||1, 2); W = innerWidth; H = innerHeight;
+  cvs.width = Math.round(W*DPR); cvs.height = Math.round(H*DPR);
+  CW = clamp(Math.round(Math.min(W/165, H/104)*10)/10, 3.4, 8.5); CH = CW; AR = 1;
+  cols = Math.floor(W/CW); rows = Math.floor(H/CH);
+  FONT = `600 ${(CH*.86).toFixed(1)}px "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace`;
+  const n = cols*rows;
+  gch = new Uint16Array(n); gr = new Uint8Array(n); gg = new Uint8Array(n); gb = new Uint8Array(n); ga = new Float32Array(n); gz = new Float32Array(n);
+  glowC.width = Math.max(1, Math.round(W/4)); glowC.height = Math.max(1, Math.round(H/4));
+  makeSky();
+}
+function clearGrid(){ gch.fill(0); ga.fill(0); gz.fill(-1e9); }
+function put(x,y,c,col,a=1,z=0){
+  x = Math.round(x); y = Math.round(y);
+  if (x<0||y<0||x>=cols||y>=rows||a<=0.02) return;
+  const i = y*cols+x; if (z < gz[i]) return;
+  gz[i] = z; gch[i] = typeof c === 'number' ? c : c.charCodeAt(0);
+  gr[i] = col[0]; gg[i] = col[1]; gb[i] = col[2]; ga[i] = Math.min(a, 1.6);
+}
+function text(x,y,s,col,a=1,z=0){ for (let k=0;k<s.length;k++) if (s[k] !== ' ') put(x+k,y,s[k],col,a,z); }
+const FLIP = {'/':'\\','\\':'/','(':')',')':'(','<':'>','>':'<','[':']',']':'[','{':'}','}':'{'};
+function sprite(x,y,art,key,a=1,z=0,flip=false,alphaFn){
+  for (let j=0;j<art.length;j++){
+    const line = art[j], kl = key[j]||'', L = line.length;
+    for (let k=0;k<L;k++){
+      let c = line[k]; if (c === ' ') continue;
+      const kc = kl[k] && kl[k] !== ' ' ? kl[k] : 'w';
+      const xx = flip ? x + (L-1-k) : x + k;
+      if (flip && FLIP[c]) c = FLIP[c];
+      const aa = alphaFn ? alphaFn(k,j) : 1;
+      put(xx, y+j, c, P[kc]||P.w, a*aa, z);
+    }
+  }
+}
+function line(x0,y0,x1,y1,c,col,a=1,z=0,frac=1){
+  const n = Math.max(Math.abs(x1-x0), Math.abs(y1-y0)) | 0, m = Math.round(n*frac);
+  for (let s=0;s<=m;s++){ const t = n ? s/n : 0; put(lerp(x0,x1,t), lerp(y0,y1,t), typeof c==='function'?c(s):c, col, a, z); }
+}
+const RAMP = '.:-=+*#%@';
+const rampChar = l => RAMP[Math.min(RAMP.length-1, Math.max(0, Math.floor(l*RAMP.length)))];
+
+/* ---------- shapes: signed distance fields (equal units; 1 unit = 1 column) ---------- */
+function sdCircle(px,py,cx,cy,r){ return Math.hypot(px-cx,py-cy)-r; }
+function sdEllipse(px,py,cx,cy,rx,ry,rot=0){
+  let dx = px-cx, dy = py-cy; if (rot){ const c=Math.cos(rot), s=Math.sin(rot); const ex = dx*c+dy*s, ey = -dx*s+dy*c; dx=ex; dy=ey; }
+  return (Math.hypot(dx/rx, dy/ry)-1)*Math.min(rx,ry);
+}
+function sdSeg(px,py,ax,ay,bx,by,r){
+  const pax=px-ax, pay=py-ay, bax=bx-ax, bay=by-ay, h = clamp((pax*bax+pay*bay)/(bax*bax+bay*bay||1));
+  return Math.hypot(pax-bax*h, pay-bay*h)-r;
+}
+function sdPoly(px,py,pts,r){ let d=1e9; for (let i=0;i<pts.length-1;i++) d = Math.min(d, sdSeg(px,py,pts[i][0],pts[i][1],pts[i+1][0],pts[i+1][1],r)); return d; }
+function sdBox(px,py,cx,cy,hw,hh){ const dx=Math.abs(px-cx)-hw, dy=Math.abs(py-cy)-hh; return Math.hypot(Math.max(dx,0),Math.max(dy,0))+Math.min(Math.max(dx,dy),0); }
+function shapeD(s,x,y){
+  switch(s.t){
+    case 'c': return sdCircle(x,y,s.x,s.y,s.r);
+    case 'e': return sdEllipse(x,y,s.x,s.y,s.rx,s.ry,s.rot||0);
+    case 'l': return sdPoly(x,y,s.pts,s.r);
+    case 'b': return sdBox(x,y,s.x,s.y,s.hw,s.hh);
+  }
+}
+/* draw a list of shapes into the grid. map: {ox,oy,k}; units -> cells: col = ox + x*k, row = oy + y*k/AR */
+const LX = -.55, LY = -.83;
+function drawShapes(shapes, map, opt={}){
+  let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9;
+  for (const s of shapes){
+    let bx0,by0,bx1,by1;
+    if (s.t==='c'){ bx0=s.x-s.r; bx1=s.x+s.r; by0=s.y-s.r; by1=s.y+s.r; }
+    else if (s.t==='e'){ const m=Math.max(s.rx,s.ry); bx0=s.x-m; bx1=s.x+m; by0=s.y-m; by1=s.y+m; }
+    else if (s.t==='b'){ bx0=s.x-s.hw; bx1=s.x+s.hw; by0=s.y-s.hh; by1=s.y+s.hh; }
+    else { bx0=1e9;by0=1e9;bx1=-1e9;by1=-1e9; for (const p of s.pts){ bx0=Math.min(bx0,p[0]);bx1=Math.max(bx1,p[0]);by0=Math.min(by0,p[1]);by1=Math.max(by1,p[1]); } bx0-=s.r;bx1+=s.r;by0-=s.r;by1+=s.r; }
+    s._b = [bx0-.5,by0-.5,bx1+.5,by1+.5];
+    x0=Math.min(x0,bx0); y0=Math.min(y0,by0); x1=Math.max(x1,bx1); y1=Math.max(y1,by1);
+  }
+  const {ox,oy,k} = map, ky = k/AR;
+  const c0 = Math.max(0, Math.floor(ox+x0*k)-1), c1 = Math.min(cols-1, Math.ceil(ox+x1*k)+1);
+  const r0 = Math.max(0, Math.floor(oy+y0*ky)-1), r1 = Math.min(rows-1, Math.ceil(oy+y1*ky)+1);
+  const half = .5/k;
+  for (let row=r0; row<=r1; row++) for (let col=c0; col<=c1; col++){
+    const ux = (col-ox)/k, uy = (row-oy)/ky;
+    let top = null, td = 0;
+    for (let i=shapes.length-1;i>=0;i--){ const s = shapes[i], b = s._b;
+      if (ux<b[0]||ux>b[2]||uy<b[1]||uy>b[3]) continue;
+      const d = shapeD(s,ux,uy); if (d < half*.9){ top = s; td = d; break; } }
+    if (!top) continue;
+    const e = .35, nx = shapeD(top,ux+e,uy)-shapeD(top,ux-e,uy), ny = shapeD(top,ux,uy+e)-shapeD(top,ux,uy-e), nl = Math.hypot(nx,ny)||1;
+    const edge = td > -half*1.6;
+    let lum = clamp(.42 + .58*(-(nx*LX+ny*LY)/nl)*(edge?1:.55) + (top.lum||0));
+    const ch = top.ch ? (typeof top.ch==='function' ? top.ch(ux,uy,lum,edge) : top.ch) : rampChar(lum*.72+.28);
+    const pc = P[top.c] || top.c, sh = .5 + .65*lum;
+    const a = opt.alpha ? opt.alpha(col, row, top, ux, uy) : 1;
+    if (a <= 0) continue;
+    put(col, row, ch, [Math.min(255,pc[0]*sh)|0, Math.min(255,pc[1]*sh)|0, Math.min(255,pc[2]*sh)|0], a*(top.a??1), (top.z||0)+(opt.z||0));
+  }
+}
+
+/* ---------- block letters for titles ---------- */
+const FONT5 = {
+  M:["#   #","## ##","# # #","#   #","#   #"], E:["#####","#    ","#### ","#    ","#####"], R:["#### ","#   #","#### ","#  # ","#   #"],
+  Y:["#   #"," # # ","  #  ","  #  ","  #  "], C:[" ####","#    ","#    ","#    "," ####"], H:["#   #","#   #","#####","#   #","#   #"],
+  I:["#####","  #  ","  #  ","  #  ","#####"], S:[" ####","#    "," ### ","    #","#### "], T:["#####","  #  ","  #  ","  #  ","  #  "],
+  A:[" ### ","#   #","#####","#   #","#   #"], ' ':["     ","     ","     ","     ","     "]
+};
+function bigText(cx,y,str,colFn,t0,t){
+  const w = str.length*6-1, x0 = Math.round(cx - w/2);
+  for (let n=0;n<str.length;n++){
+    const g = FONT5[str[n]]; if (!g) continue;
+    for (let j=0;j<5;j++) for (let i=0;i<5;i++){
+      if (g[j][i] !== '#') continue;
+      const d = t0 + n*.09 + (j*5+i)*.004, q = clamp((t-d)/.5);
+      if (q<=0) continue;
+      const ch = q < .6 ? '+*#%@'[(Math.random()*5)|0] : '#';
+      put(x0+n*6+i, y+j + (1-eOut(q))*-4, ch, colFn(n,i,j), q*1.1, 5);
+    }
+  }
+}
+
+/* ---------- sky: stars and snow made of characters ---------- */
+let stars = [], flakes = [];
+function makeSky(){
+  stars = Array.from({length: Math.round(cols*rows/55)}, () => ({ x:(Math.random()*cols)|0, y:(Math.random()*rows*.85)|0, c:'.\'.+.*.`'[(Math.random()*8)|0], p:Math.random()*6.28, s:.5+Math.random()*2, b:.25+Math.random()*.45 }));
+  flakes = Array.from({length: Math.round(cols*rows/70)}, () => ({ x:Math.random()*cols, y:Math.random()*rows, v:.04+Math.random()*.09, w:Math.random()*6.28, c:'.*\'+.'[(Math.random()*5)|0], a:.3+Math.random()*.5 }));
+}
+function drawSky(t, dt){
+  for (const s of stars) put(s.x, s.y, s.c, P.W, s.b*(.55+.45*Math.sin(t*s.s+s.p)), -100);
+  for (const f of flakes){
+    if (!reduce){ f.y += f.v*dt*60*.35; f.w += .02*dt*60; f.x += Math.sin(f.w)*.03*dt*60; if (f.y > rows+1){ f.y = -1; f.x = Math.random()*cols; } }
+    put(f.x, f.y, f.c, P.w, f.a, 40);
+  }
+}
+
+/* =====================================================================
+   ONE SCENE, in order:
+   1. green swirl pours down from the top and becomes the tree
+   2. red lights wrap around it (bright and chasing)
+   3. gifts pop in, a big star clicks onto the top
+   4. Santa's sleigh with four reindeer flies in, circles the tree, settles on the right
+   ===================================================================== */
+const T = { tree0:.2, lights0:4.6, lights1:7.6, gifts0:7.2, star0:7.8, starClick:8.5, sleigh0:6.9, orbit0:7.9, orbit1:13.4, land1:14.6 };
+
+/* Pixel art (each letter is one soft dot of that colour; '.' is empty) */
+const PX_SLEIGH = [
+  "..........ww......................",
+  "..........wwrr....................",
+  "............rrrrr.................",
+  ".............rrrrrr...............",
+  ".............rrrrrrr..............",
+  "............wwwwwwwww.............",
+  ".............sssskss..............",
+  ".............sssspsss.............",
+  "............wwwsssww..............",
+  "............wwwwwwwww.............",
+  "....nnn....rwwwwwwwwwr............",
+  "...nnynn..rrrwwwwwwwwrrrww........",
+  "..nnnnnnn.rrrrwwwwwwrrrrrrkk......",
+  "..nnnnnnn.rrrrrrwwwrrrrr..........",
+  "..nnnnnnn.kkkkkkkgkkkkkk..........",
+  "RRRRRRRRRRRRRRRRRRRRRRRRRRR....RRR",
+  "RrrrrrrrrrrrrrrrrrrrrrrrrrRR..RrrR",
+  "Rrrggggggggggggggggggggggrrr.RrrrR",
+  ".RrrrrrrrrrrrrrrrrrrrrrrrrrrRRrrR.",
+  "..RRrrrrrrrrrrrrrrrrrrrrrrrrrrRR..",
+  "....RRRRRRRRRRRRRRRRRRRRRRRRRR....",
+  ".....g.........g.........g....g...",
+  "..ggggggggggggggggggggggggggggggggg"
+];
+const PX_DEER_A = [
+  "..........c..c....",
+  "..........c.cc.c..",
+  "...........cc.cc..",
+  "............ccc...",
+  "............bbb...",
+  "...........bbkbb..",
+  "...........bbbbbbN",
+  "..........bbbb....",
+  "..bbbbbbbbrgbb....",
+  ".bbbbbbbbbrrbb....",
+  "bbbcccccccbbb.....",
+  "..bb.bb...bb.bb...",
+  ".bb...b....b...bb.",
+  ".B....B....B....B."
+];
+const PX_DEER_B = [
+  "..........c..c....",
+  "..........c.cc.c..",
+  "...........cc.cc..",
+  "............ccc...",
+  "............bbb...",
+  "...........bbkbb..",
+  "...........bbbbbbN",
+  "..........bbbb....",
+  "..bbbbbbbbrgbb....",
+  ".bbbbbbbbbrrbb....",
+  "bbbcccccccbbb.....",
+  "...bbb.....bbb....",
+  "...b.b.....b.b....",
+  "...B.B.....B.B...."
+];
+const PX_STAR = [
+  ".......w.......",
+  "......wyw......",
+  "......yyy......",
+  ".....yyyyy.....",
+  "yyyyyyywyyyyyyy",
+  ".yyyyywwwyyyyy.",
+  "..yyyyywyyyyy..",
+  "...yyyyyyyyy...",
+  "...yyyyyyyyy...",
+  "..yyyyy.yyyyy..",
+  "..yyyy...yyyy..",
+  ".yyy.......yyy.",
+  ".yy.........yy."
+];
+
+const PXC = { r:[222,58,48], R:[150,32,30], w:[246,242,232], s:[246,200,170], k:[70,62,70], p:[240,140,140], g:[245,196,80], n:[70,160,90],
+  y:[255,222,110], b:[190,124,72], B:[100,62,34], c:[236,220,186], N:[255,50,40] };
+function buildTeam(frame){
+  const d = frame ? PX_DEER_B : PX_DEER_A;
+  return { w: 79, h: 23, layers: [
+    { a:d, x:41, y:0, dim:.62 }, { a:d, x:61, y:0, dim:.62 },
+    { a:PX_SLEIGH, x:0, y:0, dim:1 },
+    { a:d, x:34, y:6, dim:1 }, { a:d, x:54, y:6, dim:1 } ] };
+}
+const TEAM = [buildTeam(0), buildTeam(1)];
+function drawPixels(rowsArr, x0, y0, a, z, flip, w, extra){
+  for (let j=0;j<rowsArr.length;j++){ const r = rowsArr[j];
+    for (let i=0;i<r.length;i++){ const c = r[i]; if (c === '.') continue;
+      const X = flip ? x0 + (w-1-i) : x0 + i;
+      put(X, y0+j, '@', PXC[c], a*(extra ? extra(c) : 1), z); } }
+}
+function drawTeam(tm, x0, y0, a, z, flip, t){
+  tm.layers.forEach((L, li) => {
+    for (let j=0;j<L.a.length;j++){ const r = L.a[j];
+      for (let i=0;i<r.length;i++){ const c = r[i]; if (c === '.') continue;
+        const xx = L.x + i, X = flip ? x0 + (tm.w-1-xx) : x0 + xx;
+        const nose = c === 'N' ? (1 + .5*Math.sin(t*6)) : 1;
+        put(X, y0+L.y+j, c === 'N' ? '*' : '@', PXC[c], a*L.dim*nose, z + li); } }
+  });
+  // reins from Santa's glove to the reindeer harnesses
+  const gx = 27, gy = 12, fx = (xx) => flip ? x0 + (tm.w-1-xx) : x0 + xx;
+  for (const tx of [44, 64]){ const n = tx - gx; for (let s=0;s<=n;s+=1){ const xx = gx + s, yy = gy + (s/n)*2 + Math.sin(s/n*Math.PI)*1.2;
+    put(fx(xx), y0 + yy, '~', PXC.g, a*.9, z + 2.5); } }
+}
+
+
+
+
+const LIGHT_COLS = [[255,52,46],[255,206,70],[80,170,255],[255,110,200],[140,255,140],[255,150,40],[220,140,255]];
+const SCENE = {
+  build(S){
+    const top = (W < 560 ? 9 : 7);   // room for the caption at the top
+    const wide = W >= H;
+    S.cx = Math.round(cols*.5);
+    S.tw = TEAM[0].w; S.th = TEAM[0].h;
+    // everything sits on the bottom edge: the 30px platform fills the last rows
+    S.pr = Math.max(1, Math.round(30/CH));
+    S.lowGround = rows - S.pr - 1;
+    S.ground = S.lowGround;
+    S.base = S.ground - 2;
+    const avail = S.base - (top + PX_STAR.length + 3);
+    const h = Math.max(10, Math.min(avail, cols*1.2));
+    S.top = S.base - h;
+    S.R = Math.min(h*.42*AR, cols*.46);
+    const pts = [];
+    const N = Math.min(9000, cols*rows*.55);
+    for (let i=0;i<N;i++){
+      const v = Math.sqrt(Math.random()), tier = (v*5)%1, r = v*S.R*(.70+.30*tier)*(.86+.14*Math.random());
+      const th = Math.random()*6.283, arm = 2*Math.PI/3, off = (((th - v*2.6*2*Math.PI) % arm) + arm) % arm / arm;
+      const tuft = .11*Math.sin(th*5 + v*19) + .08*Math.sin(th*3 - v*11) + (Math.random()-.5)*.14;
+      pts.push({ v, r, th, tuft, lite: Math.random() < .2, d: T.tree0 + .3 + v*2.6 + off*2.0 + Math.random()*.15, ch:'^*/\\^+^'[(Math.random()*7)|0] });
+    }
+    S.pts = pts;
+    // red light string: two strands wrapping down
+    S.bulbs = [];
+    const nB = 280;   // per strand; each strand sits just ahead of one green band
+    for (let j=0;j<3;j++) for (let i=0;i<nB;i++){ const u = .04 + .94*i/nB; S.bulbs.push({ u, j, th: j*2*Math.PI/3 + u*2.6*2*Math.PI + .32, bulb: i%2===0, col: LIGHT_COLS[(Math.floor(i/2) + j*3)%LIGHT_COLS.length] }); }
+    // gifts under the tree
+    const gw = [11,9,13,8,10], gc = [['r','g'],['g','r'],['N','r'],['r','w'],['i','r']];
+    let gx = S.cx - (gw.reduce((a,b)=>a+b+1,0))/2;
+    S.gifts = gw.map((w,i) => { const g = { x:Math.round(gx), w, h: Math.round((3 + (i%2))*1.6), c:gc[i], d: T.gifts0 + [2,0,3,1,4][i]*.14 }; gx += w+1; return g; });
+    // sleigh flight: enter from the left, circle the tree, settle on the right
+    S.tw = TEAM[0].w; S.th = TEAM[0].h;
+    S.oy = S.top + h*.52;
+    S.ry = Math.max(4, h*.30);
+    S.landX = wide ? Math.round(Math.min(cols - S.tw/2 - 1, S.cx + S.R + S.tw*.45)) : Math.round(cols - S.tw/2);
+    S.landY = S.lowGround - S.th/2 + .5;
+    S.rx = Math.max(S.R + 10, S.landX - S.cx);
+    S.trail = []; S.face = 1; S.lastX = null;
+  },
+  flight(S,t){
+    // returns {x,y,depth}; depth > 0 = in front of the tree
+    if (t < T.orbit0){
+      const q = eInOut(clamp((t-T.sleigh0)/(T.orbit0-T.sleigh0)));
+      const sx = -S.tw, sy = S.top - 2, ex = S.cx - S.rx, ey = S.oy;
+      return { x: lerp(sx, ex, q), y: lerp(sy, ey, q) - Math.sin(q*Math.PI)*3, depth: 1 };
+    }
+    if (t < T.orbit1){
+      // angle runs pi -> pi/2 (front) -> 0 (right) -> -pi/2 (behind) -> -pi (left) -> -3pi/2 (front) -> -2pi (right)
+      const q = eInOut(clamp((t-T.orbit0)/(T.orbit1-T.orbit0))), a = Math.PI - q*3*Math.PI;
+      const rx = lerp(S.rx, S.rx, q);
+      return { x: S.cx + Math.cos(a)*rx, y: S.oy + Math.sin(a)*S.ry - q*2, depth: Math.sin(a) };
+    }
+    const q = eInOut(clamp((t-T.orbit1)/(T.land1-T.orbit1)));
+    const sx = S.cx + S.rx, sy = S.oy - 2;
+    return { x: lerp(sx, S.landX, q), y: lerp(sy, S.landY, q) - Math.sin(q*Math.PI)*2, depth: 1 };
+  },
+  draw(S,t,dt){
+    const cx = S.cx, rot = t*.5, cR = Math.cos(rot), sR = Math.sin(rot), h = S.base - S.top;
+    // snowy ground
+    const gq = clamp((t-.1)/1);
+    for (let x=0;x<cols;x++){ if (Math.abs(x-cols/2) > cols*.5*gq) continue; put(x, S.ground, x%3?'_':'.', P.W, .55, 0); if (S.lowGround !== S.ground) put(x, S.lowGround, x%3?'_':'.', P.W, .55, 0);
+      const pr = S.pr;   // the platform is 30px tall
+      for (let k=1; k<=pr; k++) put(x, S.lowGround + k, (x+k)%2 ? '=' : 'o', P.W, .42 - .2*k/pr, 0); }
+
+    // 1. green swirl pours from the top
+    if (t < T.tree0 + 4.2){ const q = clamp((t-T.tree0)/.5); for (let k=0;k<6;k++) put(cx + Math.sin(t*9+k)*1.2, S.top - k, '|:.'[k%3], P.n, q*(1-k/6), 5); }
+    for (const p of S.pts){
+      const q = clamp((t-p.d)/1.1); if (q<=0) continue;
+      // the tree keeps a loose, flowing outline: tufts stick out and everything sways gently
+      const sway = Math.sin(t*.9 + p.v*7)*.07, breathe = 1 + .045*Math.sin(t*1.3 + p.th*4 + p.v*9);
+      const e = eInOut(q), th = p.th - (1-e)*.6*Math.PI + sway, r = p.r*lerp(1.2, 1 + p.tuft, e)*breathe;
+      const x3 = r*Math.cos(th), z3 = r*Math.sin(th);
+      const sx = cx + x3*cR - z3*sR, sz = x3*sR + z3*cR;
+      const sy = S.top + p.v*h + Math.max(0, p.tuft)*p.v*3;   // tufts droop a little, like branches
+      const depth = clamp(.5 - sz/(S.R*2));
+      const col = (q < 1 || p.lite) && depth > .45 ? P.M : depth > .62 ? P.n : P.N;
+      put(sx, sy, p.ch, col, (.28 + .8*depth)*Math.min(1,q*3)*(p.lite && q >= 1 ? .8 : 1), -sz);
+    }
+    // bright green spiral bands wind down while the tree forms. When the tree is almost done the
+    // coloured lights run down right beside them, hand in hand, and the pair swirls round together.
+    const arms = 3, turns = 2.6;
+    const lp = clamp((t-T.lights0)/(T.lights1-T.lights0)), head = eInOut(lp);
+    const spinL = eInOut(lp)*Math.PI;                         // the shared swirl, settles when the lights are done
+    const swp = clamp((t-T.tree0)/3.4), front = eInOut(swp);
+    const ribbonFade = 1 - smooth(T.lights1 - .2, T.lights1 + .7, t);
+    if (swp > 0 && ribbonFade > 0){
+      for (let j=0;j<arms;j++){
+        const steps = Math.ceil(h*4), u0 = lp > 0 ? Math.max(0, head - .16) : 0;
+        for (let k=0;k<=steps;k++){
+          const u = front*k/steps; if (u < u0) continue;           // the green hands over to the lights
+          const th = j*2*Math.PI/arms + u*turns*2*Math.PI + spinL;
+          const r = u*S.R*1.04, x3 = r*Math.cos(th), z3 = r*Math.sin(th);
+          const sx = cx + x3*cR - z3*sR, sz = x3*sR + z3*cR, sy = S.top + u*h;
+          const depth = clamp(.5 - sz/(S.R*2)), lead = clamp(1 - Math.min(front-u, lp > 0 ? Math.abs(u-head)*1.5 : 9)*6);
+          if (depth < .45 || hash(j*997 + k) > ribbonFade) continue;
+          const a = (.5 + .8*depth)*(.75 + .6*lead), c = lead > .5 ? P.m : P.M;
+          put(sx, sy, '@', c, a, 60); put(sx + 1, sy, 'o', c, a*.8, 59);
+        }
+        if (lp <= 0){   // comet head while the green is still drawing
+          const th = j*2*Math.PI/arms + front*turns*2*Math.PI, r = front*S.R*1.04;
+          const x3 = r*Math.cos(th), z3 = r*Math.sin(th), sx = cx + x3*cR - z3*sR, sz = x3*sR + z3*cR;
+          if (sz < S.R*.3) { put(sx, S.top + front*h, '*', P.w, 1.2, 70); put(sx, S.top + front*h - 1, '+', P.m, .8, 70); }
+        }
+      }
+    }
+    // 2. multicolour lights: three strands, each running just beside a green band
+    if (lp > 0){
+      for (const b of S.bulbs){
+        if (b.u > head) continue;
+        const th = b.th + spinL, r = b.u*S.R*1.0, x3 = r*Math.cos(th), z3 = r*Math.sin(th);
+        const sx = cx + x3*cR - z3*sR, sz = x3*sR + z3*cR, depth = clamp(.5 - sz/(S.R*2));
+        const y = S.top + b.u*h;
+        const fresh = head - b.u < .04;
+        const chase = .7 + .6*Math.max(0, Math.sin(b.u*60 - t*7 + b.j*2));
+        if (b.bulb){
+          put(sx, y, fresh ? '@' : (chase > 1.0 ? '@' : 'O'), fresh ? P.w : b.col, depth > .42 ? (fresh ? 1.6 : chase*1.5) : .5, depth > .42 ? 62 - sz : -sz + 1);
+        } else if (depth > .42) put(sx, y, '~', b.col, .9, 55 - sz);
+      }
+    }
+
+    // 3a. gifts pop in
+    for (const g of S.gifts){
+      const q = clamp((t-g.d)/.5); if (q<=0) continue;
+      const lift = (1-eBack(q,2.6))*5, y1 = Math.round(S.ground - 1 + lift), y0 = y1 - g.h + 1, A = Math.min(1,q*3);
+      const body = P[g.c[0]], rib = P[g.c[1]], mid = g.x + (g.w>>1);
+      for (let y=y0;y<=y1;y++) for (let x=g.x;x<g.x+g.w;x++){
+        let c = '#', col = body;
+        if (x===g.x || x===g.x+g.w-1) c = '|';
+        if (y===y0) c = '=';
+        if (x===mid){ c = y===y0 ? '+' : '|'; col = rib; }
+        put(x, y, c, col, A, 80);
+      }
+      put(mid-1, y0-1, '\\', rib, A, 80); put(mid+1, y0-1, '/', rib, A, 80); put(mid, y0-1, 'o', rib, A, 80);
+      if (q < 1) for (let k=0;k<6;k++) put(mid + (hash(k+g.x)-.5)*g.w*2*q, y0 - 1 - q*3*hash(k*3+g.w), '*', P.y, 1-q, 85);
+    }
+
+    // 3b. the big star drops and clicks into place
+    const sw = PX_STAR[0].length, restY = S.top - PX_STAR.length + 4;   // the star sits on the tip
+    if (t > T.star0){
+      let y;
+      if (t < T.starClick){ const q = clamp((t-T.star0)/(T.starClick-T.star0)); y = lerp(-PX_STAR.length-2, restY - 1, eInOut(q)); }
+      else { const q = clamp((t-T.starClick)/.25); y = restY - 1 + eBack(q,3); }
+      const clicked = t > T.starClick, flash = clicked && t - T.starClick < .35;
+      const glowA = clicked ? (flash ? 1.7 : 1.15 + .25*Math.sin(t*3)) : 1;
+      drawPixels(PX_STAR, Math.round(cx - sw/2 + .5), Math.round(y), glowA, 120, false, sw);
+      if (!clicked) for (let k=1;k<8;k++) put(cx, y - k, k<3?'|':':', P.g, (1-k/8)*.9, 110);
+      if (clicked){
+        const q = clamp((t-T.starClick)/.7), r = 3 + eOut(q)*14;
+        if (q < 1) for (let a=0;a<6.28;a+=.22) put(cx + Math.cos(a)*r*1.7, restY + 2 + Math.sin(a)*r/AR*1.7, q<.5?'*':'.', P.y, 1.4*(1-q), 115);
+        const rl = 2 + Math.round(1 + Math.sin(t*3));
+        for (let k=1;k<=rl;k++){ const a = .9/k; put(cx - sw/2 - k*2, restY+2, '-', P.g, a, 105); put(cx + sw/2 + k*2, restY+2, '-', P.g, a, 105); put(cx, restY - k - 1, '|', P.g, a, 105); }
+      }
+    }
+
+    // 4. the sleigh
+    if (SHOW_SLEIGH && t > T.sleigh0){
+      const f = this.flight(S,t), prev = this.flight(S, t-.06), vx = f.x - prev.x;
+      if (Math.abs(vx) > .04) S.face += (Math.sign(vx) - S.face)*.3;
+      if (t > T.land1 - .4) S.face += (1 - S.face)*.3;
+      const flip = S.face < 0, landed = t > T.land1;
+      const fr = landed ? TEAM[0] : TEAM[(Math.floor(t*7))%2];
+      const bob = landed ? 0 : Math.sin(t*8)*1.2;
+      const front = f.depth > -.15, z = front ? 200 : -1e6, a = front ? 1 : .5;
+      const x0 = Math.round(f.x - S.tw/2), y0 = Math.round(f.y - S.th/2 + bob);
+      if (!landed){
+        S.trail.push({ x: f.x - S.face*S.tw*.5, y: f.y + 6, b: t, z });
+      }
+      S.trail = S.trail.filter(d => t - d.b < 1.5);
+      for (const d of S.trail){ const aa = 1 - (t-d.b)/1.5; put(d.x + (hash(d.b*97)-.5)*6, d.y + (t-d.b)*4, aa>.6?'*':aa>.3?'+':'.', P.g, aa*1.2, d.z > 0 ? 190 : -1e6); }
+      drawTeam(fr, x0, y0, a, z, flip, t);
+      if (t > T.land1 && t < T.land1 + 1){ const q = t - T.land1;
+        for (let k=0;k<22;k++){ const dir = k<11 ? -1 : 1, xx = f.x + dir*(S.tw*.3 + q*hash(k)*24), yy = S.lowGround - Math.sin(q*3)*hash(k*5)*3;
+          put(xx, yy, '.*o'[k%3], P.w, 1-q, 210); } }
+    }
+    // the star's flare: sparks fly out across the whole screen, then glints keep twinkling everywhere
+    if (t > T.starClick){
+      const sx0 = cx, sy0 = restY + PX_STAR.length/2, far = Math.max(cols, rows)*.9;
+      const q = (t - T.starClick)/2.6;
+      if (q < 1) for (let i=0;i<170;i++){
+        const a = hash(i*3.1)*6.283, d = far*(.25 + .75*hash(i*7.7))*eOut(clamp(q*1.3));
+        const x = sx0 + Math.cos(a)*d, y = sy0 + Math.sin(a)*d*.75 + q*q*6;
+        const tw = .5 + .5*Math.sin(t*14 + i*1.7);
+        put(x, y, i%3 ? '*' : '+', i%4 ? P.y : P.w, (1-q)*(.6 + .9*tw), 130);
+        if (i%2) put(x - Math.cos(a)*1.5, y - Math.sin(a)*1.1, '.', P.g, (1-q)*.6, 129);
+      }
+      const amb = clamp((t - T.starClick - .8)/1.5);
+      if (amb > 0) for (let i=0;i<70;i++){
+        const ph = Math.sin(t*(1.6 + hash(i)*1.8) + i*2.3); if (ph < .75) continue;
+        const x = hash(i*5.3)*cols, y = hash(i*9.1)*rows*.92;
+        put(x, y, ph > .93 ? '*' : '+', i%3 ? P.y : P.w, amb*(ph - .7)*3.2, -50);
+      }
+    }
+    // sparkle around the finished tree
+    if (t > T.starClick + .5) for (let i=0;i<14;i++){ const a = i*2.4 + t*.3, rr = S.R*(.6 + .5*hash(i)), yy = S.top + h*(.15 + .75*hash(i+9));
+      if (Math.sin(t*2.5 + i) > .7) put(cx + Math.cos(a)*rr*1.2, yy, '*', P.y, .9, 3); }
+  }
+};
+
+/* ---------- running ---------- */
+let S = null, startAt = 0, lastNow = 0;
+function play(){ S = {}; SCENE.build(S); startAt = performance.now() - (reduce ? 20000 : 0); }
+/* every grid cell is drawn as a soft dot or diamond (no letters) */
+const SHAPES = {}, SHAPE_DEFAULT = [0,.4];
+const setShape = (chars, diamond, size) => { for (const ch of chars) SHAPES[ch.charCodeAt(0)] = [diamond, size]; };
+setShape('@O0#%', 0, .5); setShape('o', 0, .46); setShape('^/\\|=~-_', 0, .38); setShape('*', 1, .62); setShape('+', 1, .45);
+setShape(".:'`,", 0, .2);
+/* pixel shape: 'circle' or 'diamond', switched with the buttons top right (or D) */
+let PIX = 'circle';
+try { const v = localStorage.getItem('xmas-pixel'); if (v === 'circle' || v === 'diamond') PIX = v; } catch(e){}
+function setPix(v){
+  PIX = v; try { localStorage.setItem('xmas-pixel', v); } catch(e){}
+  document.getElementById('shapeCircle').setAttribute('aria-pressed', v === 'circle');
+  document.getElementById('shapeDiamond').setAttribute('aria-pressed', v === 'diamond');
+}
+const SHOW_SLEIGH = false;   // Santa and the reindeer are switched off
+const SLOW = 1.45;   // 1 = original speed; bigger = slower
+function render(){
+  ctx.setTransform(DPR,0,0,DPR,0,0); ctx.clearRect(0,0,W,H);
+  ctx.font = FONT; ctx.textBaseline = 'top'; ctx.textAlign = 'center';
+  const ox = (W - cols*CW)/2 + CW/2, oy = H - rows*CH;   // grid hugs the bottom edge
+  for (let i=0, n=cols*rows; i<n; i++){
+    const c = gch[i]; if (!c) continue;
+    const a = ga[i], x = i % cols, y = (i/cols)|0;
+    ctx.fillStyle = `rgb(${Math.min(255,gr[i]*a)|0},${Math.min(255,gg[i]*a)|0},${Math.min(255,gb[i]*a)|0})`;
+    const sh = SHAPES[c] || SHAPE_DEFAULT, px = ox + x*CW, py = oy + y*CH + CH/2, r = sh[1]*CW;
+    ctx.beginPath();
+    if (PIX === 'diamond') { const d = r*1.12; ctx.moveTo(px, py-d); ctx.lineTo(px+d, py); ctx.lineTo(px, py+d); ctx.lineTo(px-d, py); ctx.closePath(); }
+    else ctx.arc(px, py, r, 0, 6.2832);
+    ctx.fill();
+  }
+  gctx.clearRect(0,0,glowC.width,glowC.height); gctx.filter = 'blur(3px)';
+  gctx.drawImage(cvs, 0, 0, glowC.width, glowC.height); gctx.filter = 'none';
+  ctx.setTransform(1,0,0,1,0,0); ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = .6;
+  ctx.drawImage(glowC, 0, 0, cvs.width, cvs.height);
+  ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+}
+function frame(now){
+  requestAnimationFrame(frame);
+  const dt = Math.min(.05, (now - (lastNow||now))/1000); lastNow = now;
+  if (!S) return;
+  const t = (now - startAt)/1000/SLOW;
+  clearGrid(); drawSky(t, dt); SCENE.draw(S, t, dt); render();
+}
+$('replay').addEventListener('click', play);
+addEventListener('keydown', e => { if (e.metaKey || e.ctrlKey) return;
+  if (e.key==='r'||e.key==='R') play();
+  if (e.key==='d'||e.key==='D') setPix(PIX === 'circle' ? 'diamond' : 'circle'); });
+document.getElementById('shapeCircle').addEventListener('click', () => setPix('circle'));
+document.getElementById('shapeDiamond').addEventListener('click', () => setPix('diamond'));
+setPix(PIX);
+let rz; addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(() => { setup(); const el = performance.now() - startAt; play(); startAt = performance.now() - el; }, 150); });
+setup();
+const go = () => { play(); requestAnimationFrame(frame); };
+(document.fonts && document.fonts.load) ? document.fonts.load(FONT).then(go, go) : go();
+})();
+</script>
+</body>
+</html>
